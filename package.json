@@ -1,6 +1,6 @@
 {
   "name": "openblock-tools-builder",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Automated builder for OpenBlock binary tools across platforms.",
   "main": "scripts/build.js",
   "scripts": {
