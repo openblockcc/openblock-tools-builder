@@ -90,6 +90,19 @@ const setupArduino = async function (platform, targetDir, configTemplate) {
             await fs.remove(tmpDir);
         }
 
+        // Remove inventory.yaml (machine-specific fingerprint, should not be distributed)
+        const inventoryFile = path.join(targetDir, 'inventory.yaml');
+        if (await fs.pathExists(inventoryFile)) {
+            console.log('Removing inventory.yaml...');
+            await fs.remove(inventoryFile);
+        }
+
+        // Remove arduino-cli.yaml (build-time config with absolute paths, not needed in release)
+        if (await fs.pathExists(configFile)) {
+            console.log('Removing arduino-cli.yaml...');
+            await fs.remove(configFile);
+        }
+
         console.log('Arduino CLI setup complete.');
     } catch (err) {
         console.error('Error setting up Arduino CLI:', err);
