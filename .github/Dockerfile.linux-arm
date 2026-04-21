@@ -5,6 +5,9 @@ ARG VERSION=1.0.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     p7zip-full \
+    build-essential \
+    libffi-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
