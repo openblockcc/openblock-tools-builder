@@ -1,0 +1,18 @@
+board_manager:
+  additional_urls: []
+directories:
+  data: "{DATA_DIR}"
+  downloads: "{DATA_DIR}/staging"
+  user: "{DATA_DIR}"
+daemon:
+  port: "50051"
+library:
+  enable_unsafe_install: false
+logging:
+  file: ""
+  format: text
+  level: info
+metrics:
+  enabled: false
+updater:
+  enable_notification: false

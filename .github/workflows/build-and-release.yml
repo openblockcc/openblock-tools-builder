@@ -1,0 +1,115 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 3.0.0)'
+        required: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win32-x64
+            os: windows-latest
+          - platform: darwin-x64
+            os: macos-13
+          - platform: darwin-arm64
+            os: macos-14
+          - platform: linux-x64
+            os: ubuntu-latest
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+          - platform: linux-arm
+            os: ubuntu-24.04-arm
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      # linux-arm: enable QEMU for armv7 emulation (pip install may compile C extensions)
+      - name: Setup QEMU (linux-arm only)
+        if: matrix.platform == 'linux-arm'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm/v7
+
+      - name: Build
+        shell: bash
+        run: node scripts/build.js --platform ${{ matrix.platform }} --version ${{ steps.version.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openblock-tools-${{ matrix.platform }}
+          path: |
+            output/*.7z
+            output/*.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate combined checksums
+        run: |
+          cd artifacts
+          cat *.sha256 > "${{ steps.version.outputs.version }}-checksums-sha256.txt"
+          echo "Combined checksums:"
+          cat "${{ steps.version.outputs.version }}-checksums-sha256.txt"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          files: |
+            artifacts/*.7z
+            artifacts/*-checksums-sha256.txt
+          generate_release_notes: true

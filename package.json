@@ -1,0 +1,30 @@
+{
+  "name": "openblock-tools-builder",
+  "version": "3.0.0",
+  "description": "Automated builder for OpenBlock binary tools across platforms.",
+  "main": "scripts/build.js",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "build:win32-x64": "node scripts/build.js --platform win32-x64",
+    "build:darwin-x64": "node scripts/build.js --platform darwin-x64",
+    "build:darwin-arm64": "node scripts/build.js --platform darwin-arm64",
+    "build:linux-x64": "node scripts/build.js --platform linux-x64",
+    "build:linux-arm64": "node scripts/build.js --platform linux-arm64",
+    "build:linux-arm": "node scripts/build.js --platform linux-arm"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openblockcc/openblock-tools-builder.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "7zip-bin": "^5.2.0",
+    "fs-extra": "^11.2.0",
+    "node-7z": "^3.0.0",
+    "node-fetch": "^2.7.0",
+    "tar": "^6.2.1",
+    "unzipper": "^0.12.1",
+    "yaml": "^2.4.0"
+  }
+}
