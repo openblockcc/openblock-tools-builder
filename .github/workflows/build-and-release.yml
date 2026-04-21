@@ -26,8 +26,6 @@ jobs:
             os: ubuntu-latest
           - platform: linux-arm64
             os: ubuntu-24.04-arm
-          - platform: linux-arm
-            os: ubuntu-24.04-arm
 
     runs-on: ${{ matrix.os }}
 
@@ -53,13 +51,6 @@ jobs:
             echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
           fi
 
-      # linux-arm: enable QEMU for armv7 emulation (pip install may compile C extensions)
-      - name: Setup QEMU (linux-arm only)
-        if: matrix.platform == 'linux-arm'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm/v7
-
       - name: Build
         shell: bash
         run: node scripts/build.js --platform ${{ matrix.platform }} --version ${{ steps.version.outputs.version }}
@@ -73,9 +64,59 @@ jobs:
           path: |
             output/*.7z
             output/*.sha256
+            output/build-info.json
+
+  # linux-arm requires an armv7 Docker container because the armv7 Python
+  # binary links against armhf libc which is not available on arm64 runners.
+  build-linux-arm:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU for armv7
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm/v7
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build in armv7 container
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .github/Dockerfile.linux-arm
+          push: false
+          tags: build-linux-arm:latest
+          platforms: linux/arm/v7
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+      - name: Extract artifacts from container
+        run: |
+          docker create --name extract --platform linux/arm/v7 build-linux-arm:latest
+          docker cp extract:/build/output/. ./output/
+          docker rm extract
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openblock-tools-linux-arm
+          path: |
+            output/*.7z
+            output/*.sha256
+            output/build-info.json
 
   release:
-    needs: build
+    needs: [build, build-linux-arm]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
@@ -104,12 +145,88 @@ jobs:
           echo "Combined checksums:"
           cat "${{ steps.version.outputs.version }}-checksums-sha256.txt"
 
+      - name: Generate release notes
+        id: notes
+        run: |
+          node -e "
+          const fs = require('fs');
+          const glob = require('path');
+
+          // Read all build-info.json files (one per platform)
+          const infoFiles = fs.readdirSync('artifacts').filter(f => f === 'build-info.json');
+          // With merge-multiple, there may be only one (last wins), so also check subdirs
+          let infos = [];
+          if (infoFiles.length > 0) {
+            infos.push(JSON.parse(fs.readFileSync('artifacts/build-info.json', 'utf8')));
+          }
+
+          // Use the first available build-info as representative (versions are the same across platforms)
+          const info = infos[0] || {};
+          const arduino = info.arduinoCli || {};
+          const python = info.python || {};
+
+          const platforms = [
+            'win32-x64',
+            'darwin-x64',
+            'darwin-arm64',
+            'linux-x64',
+            'linux-arm64',
+            'linux-arm'
+          ];
+
+          let body = '## Tool List\n\n';
+
+          // Arduino CLI
+          body += '### Arduino CLI\n\n';
+          body += '| Item | Value |\n';
+          body += '| ---- | ----- |\n';
+          body += '| Version | ' + (arduino.version || 'N/A') + ' |\n\n';
+
+          if (arduino.builtinTools && arduino.builtinTools.length > 0) {
+            body += 'Builtin Tools:\n\n';
+            body += '| Name | Version |\n';
+            body += '| ---- | ------- |\n';
+            for (const t of arduino.builtinTools) {
+              body += '| ' + t.name + ' | ' + t.version + ' |\n';
+            }
+            body += '\n';
+          }
+
+          // Python
+          body += '### Python\n\n';
+          body += '| Item | Value |\n';
+          body += '| ---- | ----- |\n';
+          body += '| Version | ' + (python.version || 'N/A') + ' |\n';
+          body += '| Source | [python-build-standalone](https://github.com/indygreg/python-build-standalone) |\n\n';
+
+          if (python.packages && python.packages.length > 0) {
+            body += 'Packages:\n\n';
+            body += '| Name | Version |\n';
+            body += '| ---- | ------- |\n';
+            for (const p of python.packages) {
+              body += '| ' + p.name + ' | ' + p.version + ' |\n';
+            }
+            body += '\n';
+          }
+
+          // Platforms
+          body += '### Supported Platforms\n\n';
+          body += '| Platform | Archive |\n';
+          body += '| -------- | ------- |\n';
+          for (const p of platforms) {
+            body += '| ' + p + ' | openblock-tools-' + p + '-v${{ steps.version.outputs.version }}.7z |\n';
+          }
+
+          fs.writeFileSync('release-notes.md', body);
+          console.log(body);
+          "
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
+          body_path: release-notes.md
           files: |
             artifacts/*.7z
             artifacts/*-checksums-sha256.txt
-          generate_release_notes: true

@@ -1,7 +1,8 @@
+const {execSync} = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
-const {extractFull, add} = require('node-7z');
+const {add} = require('node-7z');
 const {path7za} = require('7zip-bin');
 
 const compress = async function (platform, version, distDir, outputDir) {
@@ -11,6 +12,15 @@ const compress = async function (platform, version, distDir, outputDir) {
 
     try {
         await fs.ensureDir(outputDir);
+
+        // Ensure 7za binary is executable (macOS/Linux)
+        if (process.platform !== 'win32') {
+            try {
+                execSync(`chmod +x "${path7za}"`);
+            } catch (_) {
+                // ignore if chmod fails
+            }
+        }
 
         // Create .7z archive from dist directory
         console.log(`Compressing ${distDir} -> ${archivePath}`);

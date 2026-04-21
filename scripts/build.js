@@ -1,11 +1,79 @@
+const {execSync} = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
-const {PLATFORMS} = require('./platform-config');
+const {PLATFORMS, PIP_PACKAGES} = require('./platform-config');
 const downloadArduinoCli = require('./download-arduino');
 const setupArduino = require('./setup-arduino');
 const downloadPython = require('./download-python');
 const setupPython = require('./setup-python');
 const compress = require('./compress');
+
+/**
+ * Collect version info from the built artifacts for release notes.
+ */
+const collectBuildInfo = (platform, arduinoDir, pythonDir) => {
+    const isWindows = platform.startsWith('win32');
+    const cliBinary = path.join(arduinoDir, isWindows ? 'arduino-cli.exe' : 'arduino-cli');
+    const pythonBin = isWindows
+        ? path.join(pythonDir, 'python.exe')
+        : path.join(pythonDir, 'bin', 'python3');
+
+    // Arduino CLI version
+    let arduinoVersion = 'unknown';
+    try {
+        const out = execSync(`"${cliBinary}" version --format json`, {encoding: 'utf8'});
+        const info = JSON.parse(out);
+        arduinoVersion = info.VersionString || info.Version || out.trim();
+    } catch (_) {
+        try {
+            arduinoVersion = execSync(`"${cliBinary}" version`, {encoding: 'utf8'}).trim();
+        } catch (__) { /* ignore */ }
+    }
+
+    // Builtin tools
+    const builtinTools = [];
+    const builtinDir = path.join(arduinoDir, 'packages', 'builtin', 'tools');
+    if (fs.pathExistsSync(builtinDir)) {
+        for (const tool of fs.readdirSync(builtinDir)) {
+            const toolPath = path.join(builtinDir, tool);
+            if (fs.statSync(toolPath).isDirectory()) {
+                const versions = fs.readdirSync(toolPath).filter(
+                    v => fs.statSync(path.join(toolPath, v)).isDirectory()
+                );
+                builtinTools.push({name: tool, version: versions.join(', ')});
+            }
+        }
+    }
+
+    // Python version
+    let pythonVersion = 'unknown';
+    try {
+        pythonVersion = execSync(`"${pythonBin}" --version`, {encoding: 'utf8'}).trim().replace('Python ', '');
+    } catch (_) { /* ignore */ }
+
+    // Pip packages
+    const pipPackages = [];
+    try {
+        const pipList = execSync(`"${pythonBin}" -m pip list --format json`, {encoding: 'utf8'});
+        const allPackages = JSON.parse(pipList);
+        // Only include the packages we explicitly installed (and their key deps)
+        for (const pkg of allPackages) {
+            pipPackages.push({name: pkg.name, version: pkg.version});
+        }
+    } catch (_) { /* ignore */ }
+
+    return {
+        platform,
+        arduinoCli: {
+            version: arduinoVersion,
+            builtinTools
+        },
+        python: {
+            version: pythonVersion,
+            packages: pipPackages
+        }
+    };
+};
 
 // Parse command-line arguments
 const parseArgs = () => {
@@ -74,8 +142,17 @@ const main = async () => {
     console.log('\n[5/6] Installing Python packages...');
     await setupPython(platform, pythonDir);
 
-    // Step 6: Compress
-    console.log('\n[6/6] Compressing output...');
+    // Step 6: Collect build info
+    console.log('\n[6/7] Collecting build info...');
+    const buildInfo = collectBuildInfo(platform, arduinoDir, pythonDir);
+    await fs.writeJson(path.join(outputDir, 'build-info.json'), buildInfo, {spaces: 2});
+    console.log(`  Arduino CLI: ${buildInfo.arduinoCli.version}`);
+    console.log(`  Builtin tools: ${buildInfo.arduinoCli.builtinTools.map(t => `${t.name}@${t.version}`).join(', ')}`);
+    console.log(`  Python: ${buildInfo.python.version}`);
+    console.log(`  Pip packages: ${buildInfo.python.packages.map(p => `${p.name}==${p.version}`).join(', ')}`);
+
+    // Step 7: Compress
+    console.log('\n[7/7] Compressing output...');
     await compress(platform, version, distDir, outputDir);
 
     console.log('\n' + '='.repeat(60));
