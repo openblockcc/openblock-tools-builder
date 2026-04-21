@@ -144,6 +144,7 @@ const main = async () => {
 
     // Step 6: Collect build info
     console.log('\n[6/7] Collecting build info...');
+    await fs.ensureDir(outputDir);
     const buildInfo = collectBuildInfo(platform, arduinoDir, pythonDir);
     await fs.writeJson(path.join(outputDir, 'build-info.json'), buildInfo, {spaces: 2});
     console.log(`  Arduino CLI: ${buildInfo.arduinoCli.version}`);
